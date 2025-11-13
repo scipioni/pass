@@ -110,13 +110,21 @@ agent-setup:
 
 # SSH Key Generation from GPG
 ssh-keygen:
-	@echo "Deriving SSH key from GPG key..."
+	@echo "Configuring SSH to use GPG key..."
 	@read -p "Enter GPG key ID or email: " keyid; \
 	read -p "Enter SSH key path (default: ~/.ssh/id_ed25519_from_gpg): " path; \
 	read -p "Enter SSH key type (ed25519, rsa, ecdsa) [default: ed25519]: " type; \
 	if [ -z "$$path" ]; then path="~/.ssh/id_ed25519_from_gpg"; fi; \
 	if [ -z "$$type" ]; then type="ed25519"; fi; \
-	$(CURDIR)/gpg-management/scripts/gpg-ssh-keygen.sh -k "$$keyid" -p "$$path" -t "$$type"
+	$(CURDIR)/gpg-management/scripts/gpg-ssh-keygen.sh -k "$$keyid" -p "$$path" -t "$$type"; \
+	echo ""; \
+	echo "Next steps:"; \
+	echo "1. Ensure GPG agent is configured: make gpg-agent-setup"; \
+	echo "2. Add this to your shell profile (~/.bashrc, ~/.zshrc, etc.):"; \
+	echo "   export GPG_TTY=\$$(tty)"; \
+	echo "   export SSH_AUTH_SOCK=\$$(gpgconf --list-dirs agent-ssh-socket)"; \
+	echo "3. Reload your shell or start a new session"; \
+	echo "4. Test with: ssh-add -l"
 
 # Password Store Initialization
 pass-init:

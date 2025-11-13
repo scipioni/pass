@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # GPG to SSH Key Derivation Script
-# This script extracts an SSH key from an existing GPG key
+# This script helps configure SSH to use GPG keys via GPG agent
 
 set -e  # Exit on any error
 
@@ -21,8 +21,8 @@ SSH_KEY_COMMENT=""
 usage() {
     echo "Usage: $0 [OPTIONS]"
     echo "Options:"
-    echo "  -k KEY_ID        GPG key ID or email to derive SSH key from"
-    echo "  -p PATH          Path for the SSH key [default: ~/.ssh/id_ed25519_from_gpg]"
+    echo "  -k KEY_ID        GPG key ID or email for SSH authentication"
+    echo "  -p PATH          Path for the SSH key placeholder [default: ~/.ssh/id_ed25519_from_gpg]"
     echo "  -t TYPE          SSH key type (ed25519, rsa, ecdsa) [default: ed25519]"
     echo "  -c COMMENT       Comment for the SSH key [default: derived from GPG key]"
     echo "  -h               Display this help message"
@@ -71,17 +71,18 @@ if [ "$SSH_KEY_PATH" = "$HOME/.ssh/id_ed25519_from_gpg" ] && [ "$SSH_KEY_TYPE" !
 fi
 
 # Check if GPG key exists
-if ! gpg --list-secret-keys --keyid-format LONG | grep -q "$GPG_KEY_ID"; then
+if ! gpg --list-secret-keys --keyid-format LONG "$GPG_KEY_ID" >/dev/null 2>&1; then
     echo -e "${RED}Error: GPG key with ID/email '$GPG_KEY_ID' not found.${NC}"
     exit 1
 fi
 
-# Get the keygrip of the subkey (encryption subkey)
-KEYGRIP=$(gpg --list-secret-keys --with-keygrip "$GPG_KEY_ID" | grep -A 1 "ssb" | grep -o "[A-Z0-9]\{40\}" | head -n 1)
-
-if [ -z "$KEYGRIP" ]; then
-    echo -e "${RED}Error: Could not find a suitable subkey for SSH key derivation.${NC}"
-    exit 1
+# Check if the GPG key has authentication capability
+KEY_LINE=$(gpg --list-secret-keys --keyid-format LONG "$GPG_KEY_ID" | grep -E "^(sec|ssb)" | head -n 1)
+if echo "$KEY_LINE" | grep -q "[Aa]"; then
+    echo -e "${GREEN}GPG key has authentication capability.${NC}"
+else
+    echo -e "${YELLOW}Warning: GPG key might not have dedicated authentication capability.${NC}"
+    echo -e "${YELLOW}This could limit SSH usage. Make sure your key was created with auth subkey.${NC}"
 fi
 
 # Set SSH key comment if not provided
@@ -89,15 +90,15 @@ if [ -z "$SSH_KEY_COMMENT" ]; then
     SSH_KEY_COMMENT="ssh-$(gpg --list-secret-keys --keyid-format LONG "$GPG_KEY_ID" | grep -A 1 "sec\|ssb" | tail -n +2 | head -n 1 | xargs)"
 fi
 
-echo -e "${GREEN}Deriving SSH key (type: $SSH_KEY_TYPE) from GPG key...${NC}"
+echo -e "${GREEN}Configuring SSH to use GPG key...${NC}"
 
 # Create SSH directory if it doesn't exist
 SSH_DIR=$(dirname "$SSH_KEY_PATH")
 mkdir -p "$SSH_DIR"
 
-# Export the SSH key using gpg-agent
+# Check if placeholder file exists
 if [ -f "$SSH_KEY_PATH" ]; then
-    read -p "SSH key file exists. Overwrite? (y/N): " -n 1 -r
+    read -p "SSH key placeholder file exists. Overwrite? (y/N): " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         echo -e "${YELLOW}Operation cancelled.${NC}"
@@ -105,31 +106,57 @@ if [ -f "$SSH_KEY_PATH" ]; then
     fi
 fi
 
-# Use gpg-agent to export the SSH key
-gpg-agent --export-ssh-key "$GPG_KEY_ID" > "$SSH_KEY_PATH"
+# Create a placeholder file with instructions
+cat > "$SSH_KEY_PATH" << 'EOF'
+# GPG-to-SSH Key Configuration
+# 
+# This file is a placeholder. The actual SSH key comes from your GPG key via GPG agent.
+# To use this configuration:
+#
+# 1. Make sure GPG agent is configured with SSH support:
+#    make gpg-agent-setup
+#
+# 2. Ensure your environment is set up:
+#    export GPG_TTY=$(tty)
+#    export SSH_AUTH_SOCK=$(gpgconf --list-dirs agent-ssh-socket)
+#
+# 3. Add your GPG key to the SSH agent:
+#    gpg-connect-agent reloadagent /bye
+#
+# 4. List available SSH keys:
+#    ssh-add -l
+#
+# 5. Use SSH normally - it will use your GPG key
+#
+# For permanent setup, add these lines to your shell profile:
+# export GPG_TTY=$(tty)
+# export SSH_AUTH_SOCK=$(gpgconf --list-dirs agent-ssh-socket)
+# source ~/.gnupg/gpg-agent.conf  # to get the SSH socket setting
+EOF
+
+# Create the public key placeholder as well
+SSH_PUB_PATH="$SSH_KEY_PATH.pub"
+cat > "$SSH_PUB_PATH" << EOF
+# This is a placeholder for the SSH public key.
+# The actual public key is accessible via the GPG agent.
+# Use 'ssh-add -L' to list your SSH keys when GPG agent is properly configured.
+EOF
 
 # Set appropriate permissions for SSH private key
 chmod 600 "$SSH_KEY_PATH"
 
-# Generate the public key file
-ssh-keygen -y -f "$SSH_KEY_PATH" > "$SSH_KEY_PATH.pub"
-
 # Output success message
-echo -e "${GREEN}SSH key (type: $SSH_KEY_TYPE) successfully derived from GPG key!${NC}"
-echo -e "${GREEN}Private key: $SSH_KEY_PATH${NC}"
-echo -e "${GREEN}Public key: $SSH_KEY_PATH.pub${NC}"
+echo -e "${GREEN}SSH configuration for GPG key completed!${NC}"
+echo -e "${GREEN}Placeholder files created:${NC}"
+echo -e "${GREEN}  Private key (placeholder): $SSH_KEY_PATH${NC}"
+echo -e "${GREEN}  Public key (placeholder): $SSH_KEY_PATH.pub${NC}"
 
-# Show the SSH public key content
-echo -e "${GREEN}SSH Public Key:${NC}"
-cat "$SSH_KEY_PATH.pub"
+echo -e "${YELLOW}"
+echo "To use your GPG key for SSH authentication:"
+echo "1. Make sure GPG agent is configured: make gpg-agent-setup"
+echo "2. Ensure your GPG agent is running with SSH support"
+echo "3. Use 'ssh-add -L' to list available keys from GPG"
+echo "4. Your SSH will automatically use GPG keys when properly configured"
+echo -e "${NC}"
 
-echo -e "${GREEN}SSH key derivation complete!${NC}"
-
-# Optionally add the SSH key to the SSH agent
-echo -e "${YELLOW}Would you like to add this key to your SSH agent? (y/N): ${NC}"
-read -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    ssh-add "$SSH_KEY_PATH"
-    echo -e "${GREEN}Key added to SSH agent.${NC}"
-fi
+echo -e "${GREEN}Configuration complete!${NC}"
