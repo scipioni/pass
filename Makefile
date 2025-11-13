@@ -1,7 +1,7 @@
 # GPG/SSH Key Management Makefile
 # Provides basic operations for GPG key management and password store
 
-.PHONY: help gpg-keygen ssh-keygen gpg-list gpg-list-secret pass-init pass-git-init pass-git-setup pass-sync pass-add pass-show pass-list pass-remove pass-generate docs
+.PHONY: help gpg-keygen ssh-keygen gpg-list gpg-list-secret gpg-agent-setup ssh-agent-setup agent-setup pass-init pass-git-init pass-git-setup pass-sync pass-add pass-show pass-list pass-remove pass-generate docs
 
 # Default target
 help:
@@ -12,6 +12,9 @@ help:
 	@echo "  make gpg-list                - List GPG public keys with basic info"
 	@echo "  make gpg-list-secret         - List GPG secret keys with basic info"
 	@echo "  make ssh-keygen              - Derive SSH key (Ed25519 default) from GPG key"
+	@echo "  make gpg-agent-setup         - Setup GPG agent configuration"
+	@echo "  make ssh-agent-setup         - Setup SSH agent configuration"
+	@echo "  make agent-setup             - Setup both GPG and SSH agent configurations"
 	@echo "  make pass-init               - Initialize password store"
 	@echo "  make pass-git-init           - Initialize Git repository for password store"
 	@echo "  make pass-git-setup          - Setup Git repository for password store (interactive)"
@@ -60,6 +63,50 @@ gpg-list-secret:
 		expires_date = expires != "" ? (expires == "0" ? "never" : strftime("%Y-%m-%d", expires)) : "none"; \
 		printf "%-8s %-18s %-12s %s\n", keytype, keyid, created_date, expires_date; \
 	}'
+
+# GPG Agent Setup
+gpg-agent-setup:
+	@echo "Setting up GPG agent configuration..."
+	@mkdir -p ~/.gnupg
+	@chmod 700 ~/.gnupg
+	@if [ ! -f ~/.gnupg/gpg-agent.conf ]; then \
+		echo "default-cache-ttl 600" > ~/.gnupg/gpg-agent.conf; \
+		echo "max-cache-ttl 7200" >> ~/.gnupg/gpg-agent.conf; \
+		echo "pinentry-program $(shell which pinentry 2>/dev/null || echo /usr/bin/pinentry)" >> ~/.gnupg/gpg-agent.conf; \
+		echo "enable-ssh-support" >> ~/.gnupg/gpg-agent.conf; \
+		echo "GPG agent configuration created at ~/.gnupg/gpg-agent.conf"; \
+	else \
+		echo "GPG agent configuration already exists at ~/.gnupg/gpg-agent.conf"; \
+	fi
+	@echo "Reloading GPG agent..."
+	@gpg-connect-agent reloadagent /bye 2>/dev/null || echo "Could not reload GPG agent, it may not be running"
+
+# SSH Agent Setup
+ssh-agent-setup:
+	@echo "Setting up SSH agent configuration..."
+	@mkdir -p ~/.ssh
+	@chmod 700 ~/.ssh
+	@echo "Adding SSH agent configuration to shell profiles..."
+	@echo "You will need to add SSH agent startup to your shell profile."
+	@echo "For bash, add to ~/.bashrc:"
+	@echo "  if [ -f ~/.ssh/agent-startup ]; then"
+	@echo "    . ~/.ssh/agent-startup"
+	@echo "  fi"
+	@echo ""
+	@echo "For zsh, add to ~/.zshrc:"
+	@echo "  if [ -f ~/.ssh/agent-startup ]; then"
+	@echo "    . ~/.ssh/agent-startup"
+	@echo "  fi"
+	@echo ""
+	@echo "For fish, add to ~/.config/fish/config.fish:"
+	@echo "  if test -f ~/.ssh/agent-startup"
+	@echo "    source ~/.ssh/agent-startup"
+	@echo "  end"
+
+# Agent Setup (both GPG and SSH)
+agent-setup:
+	@$(MAKE) gpg-agent-setup
+	@$(MAKE) ssh-agent-setup
 
 # SSH Key Generation from GPG
 ssh-keygen:
